@@ -1,3 +1,4 @@
 *.auto.tfvars
+backend.tf
 .DS_Store
 .terraform*

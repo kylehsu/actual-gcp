@@ -8,14 +8,20 @@ variable "container_host_network_tags" {
   description = "List of network tags to add for firewall rules"
 }
 
-variable "duckdns_subdomains" {
+variable "cloudflare_domain" {
   type        = string
-  description = "Comma-delimited list of DuckDNS subdomains"
+  description = "Your Cloudflare-managed domain (e.g., 'example.com')"
 }
 
-variable "duckdns_token" {
+variable "cloudflare_api_token" {
   type        = string
-  description = "Authentication token for DuckDNS"
+  description = "Cloudflare API token with DNS edit permissions"
+  sensitive   = true
+}
+
+variable "cloudflare_record_name" {
+  type        = string
+  description = "DNS record name (subdomain) to update, e.g., 'budget' for budget.example.com"
 }
 
 variable "public_key_path" {

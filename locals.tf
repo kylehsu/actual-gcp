@@ -4,18 +4,23 @@ locals {
     ${yamlencode({
   write_files = [
     {
-      path        = "/etc/systemd/system/duckdns.service"
+      path        = "/etc/systemd/system/cloudflare-ddns.service"
       permissions = "0644"
       owner       = "root"
       content     = <<-EOT1
                 [Unit]
-                Description=Start DuckDNS
+                Description=Cloudflare Dynamic DNS Updater
+                After=network-online.target
+                Wants=network-online.target
 
                 [Service]
-                ExecStart=/usr/bin/docker run --rm -e SUBDOMAINS=${var.duckdns_subdomains} -e TOKEN=${var.duckdns_token} --name=duckdns lscr.io/linuxserver/duckdns:latest
+                Type=simple
+                Restart=always
+                RestartSec=300
+                ExecStart=/usr/bin/docker run --rm --name=cloudflare-ddns -e API_KEY=${var.cloudflare_api_token} -e ZONE=${var.cloudflare_domain} -e SUBDOMAIN=${var.cloudflare_record_name} -e PROXIED=true oznu/cloudflare-ddns:latest
 
-                ExecStop=/usr/bin/docker stop duckdns
-                ExecStopPost=/usr/bin/docker rm duckdns
+                ExecStop=/usr/bin/docker stop cloudflare-ddns
+                ExecStopPost=/usr/bin/docker rm cloudflare-ddns
                 EOT1
     },
     {
@@ -25,9 +30,11 @@ locals {
       content     = <<-EOT2
               [Unit]
               Description=Start Caddy
+              After=network-online.target
+              Wants=network-online.target
 
               [Service]
-              ExecStart=/usr/bin/docker run --rm --network custom-bridge -p 443:443 --mount 'type=bind,source=/mnt/disks/data/caddy/Caddyfile,target=/etc/caddy/Caddyfile,readonly' --mount 'type=bind,source=/mnt/disks/data/caddy/data,target=/data' --mount 'type=bind,source=/mnt/disks/data/caddy/config,target=/config' --name=caddy caddy:alpine
+              ExecStart=/usr/bin/docker run --rm --network custom-bridge -p 443:443 -p 80:80 --mount 'type=bind,source=/mnt/disks/data/caddy/Caddyfile,target=/etc/caddy/Caddyfile,readonly' --mount 'type=bind,source=/mnt/disks/data/caddy/data,target=/data' --mount 'type=bind,source=/mnt/disks/data/caddy/config,target=/config' --name=caddy caddy:alpine
               ExecStop=/usr/bin/docker stop caddy
               ExecStopPost=/usr/bin/docker rm caddy
               EOT2
@@ -81,7 +88,7 @@ locals {
     "systemctl daemon-reload",
     "systemctl start caddy.service",
     "systemctl start actual.service",
-    "systemctl start duckdns.service"
+    "systemctl start cloudflare-ddns.service"
   ]
 
   bootcmd = [
