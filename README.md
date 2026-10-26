@@ -138,7 +138,7 @@ Some notes about the architecture of this setup:
     * If the containers are running, but things aren't working as-expected, use the following commands to inspect the container logs to further troubleshoot:
         * `docker logs actual_server`
         * `docker logs caddy`
-        * `journalctl -u cloudflare-dns.service --since yesterday`
+        * `sudo journalctl -u cloudflare-dns.service --since yesterday`
     * Run the following command to ensure the applications' "data" directory has been mounted onto the Persistent Disk (/dev/sdb):
         * ![lsblk output](./readme_resources/lsblk_output.png)
         * **Important** This part of the configuration is critical to application data persisting across virtual machine reboots.
@@ -164,96 +164,20 @@ Transient HTTP errors use bounded retries with backoff. Failed or unconfirmed
 writes do not advance the cache, so the next timer run retries. The cache is
 written atomically with mode `0600`; it does not contain credentials. The token
 is stored in `/etc/cloudflare-dns/config.json` with mode `0600`, and the script
-does not log tokens or API response bodies. The token is still present in GCE
+does not log tokens or API response bodies. The token is also present in GCE
 user-data and Terraform state, so restrict access to those existing surfaces.
 
 COS recreates `/etc` on every boot. `locals.tf` installs the script, configuration,
 service, and timer through cloud-init and starts the timer in `runcmd`; changing
 only a live unit file would not persist after reboot.
 
-### Terraform ownership and deployment paths
-
-Terraform remains the source of truth for the VM, disks, network, and boot
-configuration. `locals.tf` embeds the updater and systemd files from `scripts/`;
-the migration below installs those same files on an existing VM.
-
-| Deployment | How the DNS fix is installed |
-| --- | --- |
-| New installation | Use the original `terraform init`, `terraform plan`, and reviewed `terraform apply` workflow with the updated source. Cloud-init installs the new updater when the VM boots. |
-| Existing running VM | Use the migration below. It installs the live DNS files and updates `user-data` for subsequent boots, without restarting the VM. |
-
-Changing `user-data` through Terraform alone does not rerun cloud-init on an
-already-running VM. A live deployment step is still needed to activate changed
-files immediately. See Google's [COS cloud-init documentation](https://docs.cloud.google.com/container-optimized-os/docs/how-to/create-configure-instance#using_cloud-init_with_the_cloud_config_format).
-
-After migrating, merge or check out this updated Terraform source before the
-next infrastructure change. Applying the old source could restore the old DNS
-boot configuration. Keep using the original HCP organization/workspace and
-existing variable values; do not create a new workspace or import the VM again.
-The migration does not edit HCP state directly. A normal `terraform plan`
-[refreshes the live resource information](https://developer.hashicorp.com/terraform/cli/commands/plan)
-and compares it with the checked-out source. Review that plan before applying:
-the migration and Terraform may serialize equivalent YAML differently, and the
-image-family lookup can propose an unrelated boot disk/VM replacement. A clean
-live Terraform plan has not been established by the migration's DNS checks.
-
-Authentication has separate purposes:
-
-| Credential | Used for |
-| --- | --- |
-| `gcloud auth login` | Google Cloud CLI access for the migration, metadata updates, and IAP SSH. Cloud Shell may request separate account verification. |
-| Google Application Default Credentials (`gcloud auth application-default login` in the original workstation setup) | Google provider access when Terraform runs locally. |
-| `terraform login` HCP token | Access to the existing Terraform backend/state. Renew it if expired before using that backend; its expiry does not stop the running VM or DNS timer. |
-| Cloudflare API token | Runtime DNS reconciliation, using the existing token already configured on the VM. |
-
-### Migrate an existing deployment
-
-Use the targeted migration rather than a general `terraform apply`: the boot
-image data source can select a newer image and cause infrastructure replacement.
-The migration updates only DNS automation and its boot configuration. It never
-restarts the VM, runs disk initialization, or changes Actual/Caddy.
-
-Run from a checkout containing this change, in Cloud Shell or on a workstation
-with authenticated `gcloud`, Python 3, PyYAML, and IAP SSH access:
-
-```sh
-python3 -m venv /tmp/actual-dns-venv
-/tmp/actual-dns-venv/bin/pip install -r requirements-dev.txt
-/tmp/actual-dns-venv/bin/python scripts/migrate_dns.py \
-  --project=YOUR_PROJECT --zone=us-central1-c --instance=containerhost01 \
-  --backup-dir=/tmp/actual-dns-preview
-```
-
-This prepares protected before/after cloud-init files without changing the VM.
-Review them locally; they contain the existing API token and must not be shared
-or committed. Then use a new backup directory and add `--apply`:
-
-```sh
-/tmp/actual-dns-venv/bin/python scripts/migrate_dns.py \
-  --project=YOUR_PROJECT --zone=us-central1-c --instance=containerhost01 \
-  --backup-dir=/tmp/actual-dns-applied --apply
-```
-
-The migration checks the native Python runtime and the running Actual/Caddy
-services, reconciles DNS before retiring the old updater, and uses GCE's metadata
-fingerprint to reject concurrent metadata edits. It verifies the persisted boot
-configuration and a subsequent check with zero Cloudflare API calls. Keep the
-printed protected backup locations until deployment verification is complete.
-
 To force a reconciliation or inspect the timer from the VM:
 
 ```sh
 sudo /usr/bin/python3 /etc/cloudflare-dns/reconcile.py --force
 systemctl list-timers cloudflare-dns.timer
-journalctl -u cloudflare-dns.service --since yesterday
+sudo journalctl -u cloudflare-dns.service --since yesterday
 ```
-
-If rollback is needed, stop `cloudflare-dns.timer`, restore the saved old
-`cloudflare-ddns.service` unit, run `systemctl daemon-reload`, and restart the old
-service. Restore `user-data.before.yaml` to the VM's `user-data` metadata as well
-so the rollback survives reboot. No VM reboot is required for either migration
-or rollback. Follow the Terraform ownership steps above before a future
-infrastructure plan/apply.
 
 ### Validation
 
