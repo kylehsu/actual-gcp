@@ -15,6 +15,12 @@ resource "google_compute_disk" "container_host_boot_disk" {
   }
   physical_block_size_bytes = 4096
 
+  lifecycle {
+    # Image families advance independently of this host. Upgrade the OS with
+    # an explicit boot-disk replacement during a maintenance window.
+    ignore_changes = [image]
+  }
+
   depends_on = [google_project_service.project]
 }
 
