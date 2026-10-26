@@ -22,5 +22,5 @@ gcp_zone                 = "us-central1-c"              # Zone within the region
 # billing_alert_amount        = "5"
 
 # SSH Configuration
-user = "your_google_username"  # Your Google username without @gmail.com
-# public_key_path = "~/.ssh/id_gcp_ed25519.pub"  # Uncomment if using a different key path
+user = "your_vm_username"  # Linux SSH username on the VM, independent of your Google email
+# public_key_path = "/Users/yourname/.ssh/id_ed25519.pub"  # Absolute path on the computer running Terraform
