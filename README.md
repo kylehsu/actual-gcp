@@ -122,28 +122,72 @@ Some notes about the architecture of this setup:
         * `gcloud compute instances list`
         * `gcloud compute instances describe containerhost01`
     * **Important** - After deployment, DNS is configured automatically:
-        * The `cloudflare-ddns` container will automatically create the DNS A record (if it doesn't exist)
+        * The `cloudflare-dns.service` job will automatically create the DNS A record (if it doesn't exist)
         * The record will be created with Proxy status enabled (orange cloud) for DDoS protection and CDN
-        * The container keeps the IP updated automatically if it changes
+        * The timer checks the IP through GCP's local metadata service every five minutes. It contacts Cloudflare on startup, after an IP change, or for a daily reconciliation.
         * **Wait 2-3 minutes** for the DNS record to be created and propagate
         * Check your Cloudflare DNS dashboard to verify the record was created
         * **Verify SSL/TLS mode is set to "Full (strict)"** in Cloudflare (not "Flexible") - this was set in Step 1 but confirm it's still correct
-    * Click the SSH button in the Google Cloud console. Once connected, run `docker ps -a`. We should see three containers running:
+    * Click the SSH button in the Google Cloud console. Once connected, run `docker ps -a`. Actual and Caddy should be running; DNS maintenance uses a host systemd timer:
         * ![Docker processes](./readme_resources/docker_ps.png)
         * If the Google Cloud SSH proxy isn't working, temporarily update the "container_host_network_tags" variable in `terraform.tfvars` and re-run `terraform apply` to add the "allow-ssh" tag, which will allow SSH from your local machine. I recommend removing that network tag and re-running `terraform apply` when finished to disable direct SSH access again.
-    * If the three containers aren't running, you can inspect their associated systemctl services using the following commands:
+    * Inspect the containers and DNS timer using:
         * `systemctl status actual`
         * `systemctl status caddy`
-        * `systemctl status cloudflare-ddns`
+        * `systemctl status cloudflare-dns.timer`
     * If the containers are running, but things aren't working as-expected, use the following commands to inspect the container logs to further troubleshoot:
         * `docker logs actual_server`
         * `docker logs caddy`
-        * `docker logs cloudflare-ddns`
+        * `sudo journalctl -u cloudflare-dns.service --since yesterday`
     * Run the following command to ensure the applications' "data" directory has been mounted onto the Persistent Disk (/dev/sdb):
         * ![lsblk output](./readme_resources/lsblk_output.png)
         * **Important** This part of the configuration is critical to application data persisting across virtual machine reboots.
 16. Open your web browser and navigate to the fully-qualified domain name you set for the value of the "actual_fqdn" variable (e.g., ht<span>tps://</span>budget.example.com). You should see the Actual Budget login page. You're now ready to setup your budget. Follow [Actual Budget's Getting Started][17] page for next steps.
     * ![Actual Budget login](./readme_resources/actual_login_page.png)
+
+## DNS maintenance
+
+The VM uses an ephemeral external IPv4 address. Stopping and starting the VM can
+change that address, so DNS must be reconciled after startup. Cloudflare records
+do not require a periodic heartbeat to remain configured.
+
+`scripts/cloudflare_dns.py` runs as a systemd oneshot service on startup and every
+five minutes. It reads the external IP from GCP's local metadata endpoint and
+compares it with the last successfully published address in
+`/var/lib/cloudflare-dns/state.json`. An unchanged IP and a fresh cache produce
+**zero Cloudflare API calls**. A new boot, a changed IP, missing/corrupt state, or
+24 hours since the last successful reconciliation triggers a Cloudflare lookup.
+The job creates or patches the single A record only when needed, keeping the
+Cloudflare proxy enabled. It fails safely if multiple matching A records exist.
+
+Transient HTTP errors use bounded retries with backoff. Failed or unconfirmed
+writes do not advance the cache, so the next timer run retries. The cache is
+written atomically with mode `0600`; it does not contain credentials. The token
+is stored in `/etc/cloudflare-dns/config.json` with mode `0600`, and the script
+does not log tokens or API response bodies. The token is also present in GCE
+user-data and Terraform state, so restrict access to those existing surfaces.
+
+COS recreates `/etc` on every boot. `locals.tf` installs the script, configuration,
+service, and timer through cloud-init and starts the timer in `runcmd`; changing
+only a live unit file would not persist after reboot.
+
+To force a reconciliation or inspect the timer from the VM:
+
+```sh
+sudo /usr/bin/python3 /etc/cloudflare-dns/reconcile.py --force
+systemctl list-timers cloudflare-dns.timer
+sudo journalctl -u cloudflare-dns.service --since yesterday
+```
+
+### Validation
+
+```sh
+python3 -m pip install -r requirements-dev.txt
+python3 -m unittest discover -s tests -v
+terraform fmt -check
+terraform init -backend=false
+terraform validate
+```
 
 ## Updating Actual Server
 There are a couple of ways you could use to try to update Actual Server to a newer version.

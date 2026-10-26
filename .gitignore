@@ -2,3 +2,5 @@
 backend.tf
 .DS_Store
 .terraform*
+__pycache__/
+*.pyc

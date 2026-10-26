@@ -4,24 +4,32 @@ locals {
     ${yamlencode({
   write_files = [
     {
-      path        = "/etc/systemd/system/cloudflare-ddns.service"
+      path        = "/etc/cloudflare-dns/reconcile.py"
+      permissions = "0600"
+      owner       = "root"
+      content     = file("${path.module}/scripts/cloudflare_dns.py")
+    },
+    {
+      path        = "/etc/cloudflare-dns/config.json"
+      permissions = "0600"
+      owner       = "root"
+      content = jsonencode({
+        api_token   = var.cloudflare_api_token
+        zone_name   = var.cloudflare_domain
+        record_name = var.cloudflare_record_name
+      })
+    },
+    {
+      path        = "/etc/systemd/system/cloudflare-dns.service"
       permissions = "0644"
       owner       = "root"
-      content     = <<-EOT1
-                [Unit]
-                Description=Cloudflare Dynamic DNS Updater
-                After=network-online.target
-                Wants=network-online.target
-
-                [Service]
-                Type=simple
-                Restart=always
-                RestartSec=300
-                ExecStart=/usr/bin/docker run --rm --name=cloudflare-ddns -e API_KEY=${var.cloudflare_api_token} -e ZONE=${var.cloudflare_domain} -e SUBDOMAIN=${var.cloudflare_record_name} -e PROXIED=true oznu/cloudflare-ddns:latest
-
-                ExecStop=/usr/bin/docker stop cloudflare-ddns
-                ExecStopPost=/usr/bin/docker rm cloudflare-ddns
-                EOT1
+      content     = file("${path.module}/scripts/cloudflare-dns.service")
+    },
+    {
+      path        = "/etc/systemd/system/cloudflare-dns.timer"
+      permissions = "0644"
+      owner       = "root"
+      content     = file("${path.module}/scripts/cloudflare-dns.timer")
     },
     {
       path        = "/etc/systemd/system/caddy.service"
@@ -88,7 +96,8 @@ locals {
     "systemctl daemon-reload",
     "systemctl start caddy.service",
     "systemctl start actual.service",
-    "systemctl start cloudflare-ddns.service"
+    "systemctl stop cloudflare-ddns.service 2>/dev/null || true",
+    "systemctl start cloudflare-dns.timer"
   ]
 
   bootcmd = [

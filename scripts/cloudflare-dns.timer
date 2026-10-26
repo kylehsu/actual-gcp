@@ -1,0 +1,8 @@
+[Unit]
+Description=Check the local external IP every five minutes
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=5min
+AccuracySec=15s
+Unit=cloudflare-dns.service
