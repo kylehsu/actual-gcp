@@ -3,6 +3,7 @@ import importlib.util
 import json
 from pathlib import Path
 import unittest
+from unittest.mock import Mock, patch
 
 import yaml
 
@@ -58,6 +59,26 @@ class MigrationTests(unittest.TestCase):
     def test_plain_unrelated_metadata_is_rejected(self):
         with self.assertRaises(ValueError):
             migration.transform("something: unrelated", SOURCE)
+
+    def test_metadata_write_uses_fingerprint_and_preserves_other_keys(self):
+        snapshot = {"metadata": {"fingerprint": "existing-fingerprint", "items": [
+            {"key": "user-data", "value": "old"}, {"key": "ssh-keys", "value": "existing-key"}]}}
+        before = copy.deepcopy(snapshot)
+        args = Mock(project="project-id", zone="us-central1-c", instance="containerhost01")
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.read.return_value = b'{"name":"operation-id"}'
+        with patch.object(migration, "cli", side_effect=["private-test-access-token\n", ""]) as cli:
+            with patch.object(migration.request, "urlopen", return_value=response) as post:
+                migration.set_user_data(snapshot, "new", args, ["--zone=us-central1-c"])
+        request = post.call_args.args[0]
+        body = json.loads(request.data)
+        self.assertEqual(body["fingerprint"], "existing-fingerprint")
+        self.assertEqual(body["items"], [{"key": "user-data", "value": "new"},
+                                         {"key": "ssh-keys", "value": "existing-key"}])
+        self.assertEqual(snapshot, before)
+        self.assertIn("operation-id", cli.call_args.args[0])
 
 
 if __name__ == "__main__":
