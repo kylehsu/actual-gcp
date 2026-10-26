@@ -11,6 +11,7 @@ from pathlib import Path
 import shlex
 import subprocess
 import tarfile
+import time
 from urllib import parse, request
 
 import yaml
@@ -96,6 +97,24 @@ def describe(instance_name, common):
                            *common, "--format=json"], capture=True))
 
 
+def wait_for_operation(operation, args, token):
+    url = "https://compute.googleapis.com/compute/v1/projects/%s/zones/%s/operations/%s" % (
+        parse.quote(args.project, safe=""), parse.quote(args.zone, safe=""),
+        parse.quote(operation["name"], safe=""))
+    deadline = time.monotonic() + 120
+    while True:
+        if operation.get("status") == "DONE":
+            if operation.get("error") or operation.get("httpErrorStatusCode"):
+                raise RuntimeError("Metadata operation failed; API details suppressed")
+            return
+        if time.monotonic() >= deadline:
+            raise RuntimeError("Metadata operation did not complete within two minutes")
+        time.sleep(2)
+        req = request.Request(url, headers={"Authorization": "Bearer " + token})
+        with request.urlopen(req, timeout=15) as response:
+            operation = json.load(response)
+
+
 def set_user_data(snapshot, user_data, args, common):
     metadata = snapshot["metadata"]
     items = [dict(item) for item in metadata["items"]]
@@ -112,7 +131,7 @@ def set_user_data(snapshot, user_data, args, common):
         "Authorization": "Bearer " + token, "Content-Type": "application/json"})
     with request.urlopen(req, timeout=30) as response:
         operation = json.load(response)
-    cli(["gcloud", "compute", "operations", "wait", operation["name"], *common, "--quiet"])
+    wait_for_operation(operation, args, token)
 
 
 def main():
