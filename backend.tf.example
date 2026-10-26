@@ -1,0 +1,10 @@
+terraform {
+  cloud {
+
+    organization = "your-organization"  # Replace with your HCP Terraform organization name
+
+    workspaces {
+      name = "your-workspace"  # Replace with your HCP Terraform workspace name
+    }
+  }
+}

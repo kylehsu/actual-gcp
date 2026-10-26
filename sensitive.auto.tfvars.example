@@ -1,0 +1,26 @@
+# Example sensitive.auto.tfvars file
+# Copy this file to sensitive.auto.tfvars and fill in your actual values
+# The .gitignore file will prevent sensitive.auto.tfvars from being committed
+
+# Cloudflare Configuration
+cloudflare_domain      = "yourdomain.com"                      # Your Cloudflare-managed domain
+cloudflare_api_token   = "your_cloudflare_api_token_here"     # API token (without "Authorization: Bearer" prefix)
+cloudflare_record_name = "budget"                              # Subdomain (e.g., "budget" for budget.yourdomain.com)
+
+# Actual Budget Configuration
+actual_fqdn = "budget.yourdomain.com"  # Full domain for your Actual Budget instance
+
+# GCP Configuration
+gcp_project_name         = "your-gcp-project-name"
+gcp_billing_project_name = "your-gcp-billing-project"  # Often the same as gcp_project_name
+gcp_region               = "us-central1"                # Must be a free-tier eligible region
+gcp_zone                 = "us-central1-c"              # Zone within the region
+
+# Billing Alert Configuration (optional, defaults shown)
+# billing_account_name       = "My Billing Account"
+# billing_alert_currency_code = "USD"
+# billing_alert_amount        = "5"
+
+# SSH Configuration
+user = "your_google_username"  # Your Google username without @gmail.com
+# public_key_path = "~/.ssh/id_gcp_ed25519.pub"  # Uncomment if using a different key path
