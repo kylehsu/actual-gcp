@@ -171,6 +171,41 @@ COS recreates `/etc` on every boot. `locals.tf` installs the script, configurati
 service, and timer through cloud-init and starts the timer in `runcmd`; changing
 only a live unit file would not persist after reboot.
 
+### Terraform ownership and deployment paths
+
+Terraform remains the source of truth for the VM, disks, network, and boot
+configuration. `locals.tf` embeds the updater and systemd files from `scripts/`;
+the migration below installs those same files on an existing VM.
+
+| Deployment | How the DNS fix is installed |
+| --- | --- |
+| New installation | Use the original `terraform init`, `terraform plan`, and reviewed `terraform apply` workflow with the updated source. Cloud-init installs the new updater when the VM boots. |
+| Existing running VM | Use the migration below. It installs the live DNS files and updates `user-data` for subsequent boots, without restarting the VM. |
+
+Changing `user-data` through Terraform alone does not rerun cloud-init on an
+already-running VM. A live deployment step is still needed to activate changed
+files immediately. See Google's [COS cloud-init documentation](https://docs.cloud.google.com/container-optimized-os/docs/how-to/create-configure-instance#using_cloud-init_with_the_cloud_config_format).
+
+After migrating, merge or check out this updated Terraform source before the
+next infrastructure change. Applying the old source could restore the old DNS
+boot configuration. Keep using the original HCP organization/workspace and
+existing variable values; do not create a new workspace or import the VM again.
+The migration does not edit HCP state directly. A normal `terraform plan`
+[refreshes the live resource information](https://developer.hashicorp.com/terraform/cli/commands/plan)
+and compares it with the checked-out source. Review that plan before applying:
+the migration and Terraform may serialize equivalent YAML differently, and the
+image-family lookup can propose an unrelated boot disk/VM replacement. A clean
+live Terraform plan has not been established by the migration's DNS checks.
+
+Authentication has separate purposes:
+
+| Credential | Used for |
+| --- | --- |
+| `gcloud auth login` | Google Cloud CLI access for the migration, metadata updates, and IAP SSH. Cloud Shell may request separate account verification. |
+| Google Application Default Credentials (`gcloud auth application-default login` in the original workstation setup) | Google provider access when Terraform runs locally. |
+| `terraform login` HCP token | Access to the existing Terraform backend/state. Renew it if expired before using that backend; its expiry does not stop the running VM or DNS timer. |
+| Cloudflare API token | Runtime DNS reconciliation, using the existing token already configured on the VM. |
+
 ### Migrate an existing deployment
 
 Use the targeted migration rather than a general `terraform apply`: the boot
@@ -217,8 +252,8 @@ If rollback is needed, stop `cloudflare-dns.timer`, restore the saved old
 `cloudflare-ddns.service` unit, run `systemctl daemon-reload`, and restart the old
 service. Restore `user-data.before.yaml` to the VM's `user-data` metadata as well
 so the rollback survives reboot. No VM reboot is required for either migration
-or rollback. Keep the updated Terraform source with your infrastructure files
-before the next plan/apply; this targeted migration does not rewrite HCP state.
+or rollback. Follow the Terraform ownership steps above before a future
+infrastructure plan/apply.
 
 ### Validation
 
