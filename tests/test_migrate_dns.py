@@ -68,8 +68,8 @@ class MigrationTests(unittest.TestCase):
         response = Mock()
         response.__enter__ = Mock(return_value=response)
         response.__exit__ = Mock(return_value=False)
-        response.read.return_value = b'{"name":"operation-id"}'
-        with patch.object(migration, "cli", side_effect=["private-test-access-token\n", ""]) as cli:
+        response.read.return_value = b'{"name":"operation-id","status":"DONE"}'
+        with patch.object(migration, "cli", return_value="private-test-access-token\n") as cli:
             with patch.object(migration.request, "urlopen", return_value=response) as post:
                 migration.set_user_data(snapshot, "new", args, ["--zone=us-central1-c"])
         request = post.call_args.args[0]
@@ -78,7 +78,34 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(body["items"], [{"key": "user-data", "value": "new"},
                                          {"key": "ssh-keys", "value": "existing-key"}])
         self.assertEqual(snapshot, before)
-        self.assertIn("operation-id", cli.call_args.args[0])
+        cli.assert_called_once_with(["gcloud", "auth", "print-access-token"], capture=True)
+
+    def test_pending_metadata_operation_is_polled_until_done(self):
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.read.return_value = b'{"name":"operation-id","status":"DONE"}'
+        args = Mock(project="project-id", zone="us-central1-c")
+        with patch.object(migration.request, "urlopen", return_value=response) as get:
+            with patch.object(migration.time, "sleep"):
+                migration.wait_for_operation({"name": "operation-id", "status": "RUNNING"},
+                                             args, "private-test-access-token")
+        self.assertEqual(get.call_args.args[0].full_url,
+                         "https://compute.googleapis.com/compute/v1/projects/project-id/"
+                         "zones/us-central1-c/operations/operation-id")
+        self.assertEqual(get.call_args.args[0].get_method(), "GET")
+
+    def test_failed_metadata_operation_prevents_activation(self):
+        with self.assertRaisesRegex(RuntimeError, "API details suppressed"):
+            migration.wait_for_operation({"name": "operation-id", "status": "DONE",
+                                          "error": {"errors": [{"message": "private-detail"}]}},
+                                         Mock(project="project-id", zone="us-central1-c"), "token")
+
+    def test_metadata_operation_wait_has_a_deadline(self):
+        with patch.object(migration.time, "monotonic", side_effect=[0, 121]):
+            with self.assertRaisesRegex(RuntimeError, "two minutes"):
+                migration.wait_for_operation({"name": "operation-id", "status": "RUNNING"},
+                                             Mock(project="project-id", zone="us-central1-c"), "token")
 
 
 if __name__ == "__main__":
