@@ -81,12 +81,13 @@ def archive_files(entries):
     return base64.b64encode(buffer.getvalue()).decode()
 
 
-def cli(arguments, capture=False):
+def cli(arguments, capture=False, stdin=None):
     # Never emit metadata, credentials, or the payload on command failure.
-    result = subprocess.run(arguments, stdout=subprocess.PIPE if capture else None,
+    result = subprocess.run(arguments, input=stdin, stdout=subprocess.PIPE if capture else None,
                             stderr=subprocess.PIPE, text=True)
     if result.returncode:
-        raise RuntimeError("gcloud operation failed; inspect Cloud Console or rerun the preflight")
+        raise RuntimeError("gcloud %s failed (exit %s); command payload and stderr suppressed" % (
+            " ".join(arguments[1:3]), result.returncode))
     return result.stdout if capture else ""
 
 
@@ -168,7 +169,8 @@ def main():
         "systemctl daemon-reload",
         "systemctl start cloudflare-dns.service",
     ])
-    cli([*ssh, "--command=sudo bash -c " + shlex.quote(install)])
+    # Send the credential-bearing archive on stdin, never in process arguments.
+    cli([*ssh, "--command=sudo bash -s"], stdin=install)
     # Use optimistic concurrency so another metadata edit is never overwritten.
     current = describe(args.instance, common)
     before = instance.get("metadata", {}).get("fingerprint")
@@ -217,6 +219,10 @@ def main():
 if __name__ == "__main__":
     try:
         main()
+    except RuntimeError as exc:
+        print(str(exc))
+        print("Migration stopped; check the protected backups and VM status.")
+        raise SystemExit(1)
     except Exception:
         print("Migration stopped. Credentials and command payloads are suppressed. Check the protected backups and VM status.")
         raise SystemExit(1)
