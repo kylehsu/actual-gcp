@@ -1,0 +1,22 @@
+[Unit]
+Description=Reconcile Cloudflare DNS with this VM's external IP
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /etc/cloudflare-dns/reconcile.py
+TimeoutStartSec=180
+UMask=0077
+StateDirectory=cloudflare-dns
+StateDirectoryMode=0700
+Environment=PYTHONDONTWRITEBYTECODE=1
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ReadWritePaths=/var/lib/cloudflare-dns
