@@ -78,7 +78,7 @@ locals {
       owner       = "root"
       content     = <<-EOT5
         #!/bin/bash
-
+      
         DEVICE=/dev/disk/by-id/google-persistent-disk-1
 
         if ! blkid $DEVICE >/dev/null 2>&1; then
