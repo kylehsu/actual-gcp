@@ -164,6 +164,14 @@ There are a couple of ways you could use to try to update Actual Server to a new
         * ![Manual update container](./readme_resources/update_container.png)
     * Your server should now reflect the most recent version.
         * ![Version check](./readme_resources/actual_update.png)
+    * You may run into disk space issues on the VM after several updates, e.g. `no space left on device`. In that scenario run
+        ```
+        docker ps -a
+        docker images
+        docker system prune -af
+        ```
+      `docker system prune -af` removes unused images, stopped containers, and dangling build cache
+
 
 ## Upgrading an Existing Deployment Past the Custom-Mode VPC Change
 Earlier versions of this repository created an auto-mode VPC network (Google Cloud's default), which conflicts with the [documented best-practices regarding VPC design][13] this repository otherwise follows. The network configuration has since been changed to create a custom-mode VPC instead.
