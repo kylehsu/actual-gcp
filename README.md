@@ -106,6 +106,7 @@ Some notes about the architecture of this setup:
         * gcp_zone = The zone within the GCP region you want to use (for example, us-central1-c).
         * public_key_path - The path on your local machine to the SSH public key that was generated in Step #4 (if it was named something other than the default value defined in `compute-variables.tf`)
         * user = "your_google_username" - It should be your Google username without the "@gmail.com". If you use the SSH proxy to login from the GCP console, it will log you in automatically as this user.
+        * vm_image_project = "cos-cloud" and vm_image_family = "cos-125-lts" - Select a supported Container-Optimized OS LTS family for new hosts. See Google's [COS release lifecycle](https://cloud.google.com/container-optimized-os/docs/concepts/versioning) when choosing or updating the family. Existing boot disks keep their current image until you explicitly replace them during OS maintenance.
         * vpc_subnet_cidr = "your_cidr_range" - This isn't really a sensitive variable, but to simplify things, we can put it in the same ".auto.tfvars" file. The default is "10.0.0.0/24"; choose a range that does not conflict with your other networks.
         * **Note** - The `.gitignore` file is configured to ignore any *.auto.tfvars files. Be extremely cautious with what variable values you allow to be pushed to your source control (Git) repository.
         * **Note** - You could also define these variables within HCP Terraform if you want to have your Terraform actions performed there instead of your local command line.
@@ -198,24 +199,28 @@ before applying this configuration. Use the [zone move procedure](docs/infrastru
 when changing zones, so the VM and its disks stay together.
 
 ## Updating Actual Server
-There are a couple of ways you could use to try to update Actual Server to a newer version.
 
-1. Re-run `terraform apply`. If a newer version of the Google Container Optimized OS image has been published, the virtual machine will be destroyed and re-deployed, pulling the latest version of the actualbudget/actual-server container during the re-deploy.
-2. If you want to manually trigger an update, you can perform the following steps:
-    * SSH into the virtual machine.
-        * ![GCP Console SSH](./readme_resources/ssh_vm.png)
-    * Issue the following commands:
-        ```
-        docker pull actualbudget/actual-server:latest
-        sudo systemctl restart actual
-        ```
-        * ![Manual update container](./readme_resources/update_container.png)
-    * Your server should now reflect the most recent version.
-        * ![Version check](./readme_resources/actual_update.png)
-    * You may run into disk space issues on the VM after several updates, e.g. `no space left on device`. In that scenario run
-        ```
-        docker ps -a
-        docker images
-        docker system prune -af
-        ```
-      `docker system prune -af` removes unused images, stopped containers, and dangling build cache
+Terraform preserves the existing boot disk when its image family advances. Updating the OS requires a planned boot-disk and VM replacement after backing up the data disk; a routine `terraform apply` does not perform that upgrade.
+
+To update Actual Server on the running VM:
+
+1. SSH into the virtual machine.
+   ![GCP Console SSH](./readme_resources/ssh_vm.png)
+2. Pull the current image and restart Actual:
+   ```sh
+   sudo docker pull actualbudget/actual-server:latest
+   sudo systemctl restart actual.service
+   ```
+   ![Manual update container](./readme_resources/update_container.png)
+3. Check the version in Actual.
+   ![Version check](./readme_resources/actual_update.png)
+
+If updates eventually fail with `no space left on device`, inspect the containers and images, then remove unused Docker resources:
+
+```sh
+sudo docker ps -a
+sudo docker images
+sudo docker system prune -af
+```
+
+`docker system prune -af` removes unused images, stopped containers, and dangling build cache.
