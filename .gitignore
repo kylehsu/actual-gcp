@@ -1,6 +1,8 @@
 *.auto.tfvars
 backend.tf
 .DS_Store
-.terraform*
+.terraform/
+*.tfstate
+*.tfstate.*
 __pycache__/
 *.pyc

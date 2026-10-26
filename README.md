@@ -82,7 +82,7 @@ Some notes about the architecture of this setup:
     * `gcloud compute firewall-rules list`
     * For each firewall rule listed, run `gcloud compute firewall-rules delete rulename`
     * `gcloud compute networks delete default`
-    * If you already have resources active using the default VPC, skip this step and update the Terraform code to remove the new 'google_compute_network' and 'google_compute_route' resources, as well as modifying the network for the 'google_compute_firewall' and 'google_compute_instance' resources.
+    * If you already have resources active using the default VPC, skip this step and update the Terraform code to remove the new 'google_compute_network' and 'google_compute_subnetwork' resources, as well as modifying the network and subnetwork references in the 'google_compute_firewall' and 'google_compute_instance' resources to point to your existing default VPC.
     * Deleting the default network and using a custom network helps align with [documented best-practices regarding VPC design][13].
 10. We're now ready to begin configuring our local Terraform environment. Run the following command to [authenticate with HCP Terraform][14]:
     * `terraform login`
@@ -104,8 +104,9 @@ Some notes about the architecture of this setup:
         * gcp_project_name = The name of your GCP project.
         * gcp_region = The GCP region you wish your workload to run in (for example, us-central1). Keep in mind [only certain regions are eligible for the always-free Compute Engine instance][3].
         * gcp_zone = The zone within the GCP region you want to use (for example, us-central1-c).
-        * public_key_path - The path on your local machine to the SSH public key that was generated in Step #2 (if it was named something other than the default value defined in `compute-variables.tf`)
+        * public_key_path - The path on your local machine to the SSH public key that was generated in Step #4 (if it was named something other than the default value defined in `compute-variables.tf`)
         * user = "your_google_username" - It should be your Google username without the "@gmail.com". If you use the SSH proxy to login from the GCP console, it will log you in automatically as this user.
+        * vpc_subnet_cidr = "your_cidr_range" - This isn't really a sensitive variable, but to simplify things, we can put it in the same ".auto.tfvars" file. The default is "10.0.0.0/24"; choose a range that does not conflict with your other networks.
         * **Note** - The `.gitignore` file is configured to ignore any *.auto.tfvars files. Be extremely cautious with what variable values you allow to be pushed to your source control (Git) repository.
         * **Note** - You could also define these variables within HCP Terraform if you want to have your Terraform actions performed there instead of your local command line.
         * ![Example Variables](./readme_resources/variable_values.png)
@@ -188,6 +189,13 @@ terraform fmt -check
 terraform init -backend=false
 terraform validate
 ```
+
+## Infrastructure maintenance
+
+The VPC uses a custom subnet in the configured region. Existing auto-mode
+deployments need the [network adoption procedure](docs/infrastructure-operations.md#custom-mode-vpc-adoption)
+before applying this configuration. Use the [zone move procedure](docs/infrastructure-operations.md#moving-to-a-different-zone)
+when changing zones, so the VM and its disks stay together.
 
 ## Updating Actual Server
 There are a couple of ways you could use to try to update Actual Server to a newer version.

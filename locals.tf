@@ -56,7 +56,7 @@ locals {
                 Description=Start Actual
 
                 [Service]
-                ExecStart=/usr/bin/docker run --rm --network custom-bridge -p '[::1]:5006:5006' --mount 'type=bind,source=/mnt/disks/data/actual-data,target=/data' --name=actual_server actualbudget/actual-server:latest
+                ExecStart=/usr/bin/docker run --rm --network custom-bridge --mount 'type=bind,source=/mnt/disks/data/actual-data,target=/data' --name=actual_server actualbudget/actual-server:latest
                 ExecStop=/usr/bin/docker stop actual_server
                 ExecStopPost=/usr/bin/docker rm actual_server
                 EOT3
@@ -79,9 +79,14 @@ locals {
       content     = <<-EOT5
         #!/bin/bash
       
-        mkfs.ext4 -L data -m 0 -E lazy_itable_init=0,lazy_journal_init=0,discard /dev/disk/by-id/google-persistent-disk-1
+        DEVICE=/dev/disk/by-id/google-persistent-disk-1
+
+        if ! blkid $DEVICE >/dev/null 2>&1; then
+          mkfs.ext4 -L data -m 0 -E lazy_itable_init=0,lazy_journal_init=0,discard $DEVICE
+        fi
+
         mkdir -p /mnt/disks/data
-        mount -t ext4 -o nodev,nosuid /dev/disk/by-id/google-persistent-disk-1 /mnt/disks/data
+        mount -t ext4 -o nodev,nosuid $DEVICE /mnt/disks/data
         mkdir -p /mnt/disks/data/caddy
         mkdir -p /mnt/disks/data/caddy/data
         mkdir -p /mnt/disks/data/caddy/config
