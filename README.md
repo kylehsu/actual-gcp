@@ -104,9 +104,8 @@ Some notes about the architecture of this setup:
         * gcp_project_name = The name of your GCP project.
         * gcp_region = The GCP region you wish your workload to run in (for example, us-central1). Keep in mind [only certain regions are eligible for the always-free Compute Engine instance][3].
         * gcp_zone = The zone within the GCP region you want to use (for example, us-central1-c).
-        * public_key_path - The path on your local machine to the SSH public key that was generated in Step #4 (if it was named something other than the default value defined in `compute-variables.tf`)
-        * user = "your_google_username" - It should be your Google username without the "@gmail.com". If you use the SSH proxy to login from the GCP console, it will log you in automatically as this user.
-        * vm_image_project = "cos-cloud" and vm_image_family = "cos-125-lts" - Select a supported Container-Optimized OS LTS family for new hosts. See Google's [COS release lifecycle](https://cloud.google.com/container-optimized-os/docs/concepts/versioning) when choosing or updating the family. Existing boot disks keep their current image until you explicitly replace them during OS maintenance.
+        * public_key_path - The absolute path on your local machine to your SSH public key, for example `/Users/yourname/.ssh/id_ed25519.pub`. Set this to a key that exists on the computer running Terraform.
+        * user = "your_vm_username" - The Linux username used for the VM's SSH key. It is independent of your local computer's username and Google account email.
         * vpc_subnet_cidr = "your_cidr_range" - This isn't really a sensitive variable, but to simplify things, we can put it in the same ".auto.tfvars" file. The default is "10.0.0.0/24"; choose a range that does not conflict with your other networks.
         * **Note** - The `.gitignore` file is configured to ignore any *.auto.tfvars files. Be extremely cautious with what variable values you allow to be pushed to your source control (Git) repository.
         * **Note** - You could also define these variables within HCP Terraform if you want to have your Terraform actions performed there instead of your local command line.
@@ -141,7 +140,7 @@ Some notes about the architecture of this setup:
         * `docker logs actual_server`
         * `docker logs caddy`
         * `sudo journalctl -u cloudflare-dns.service --since yesterday`
-    * Run the following command to ensure the applications' "data" directory has been mounted onto the Persistent Disk (/dev/sdb):
+    * Run `findmnt /mnt/disks/data` to confirm the applications' data directory is mounted from the persistent data disk. Device letters such as `/dev/sda` and `/dev/sdb` can vary:
         * ![lsblk output](./readme_resources/lsblk_output.png)
         * **Important** This part of the configuration is critical to application data persisting across virtual machine reboots.
 16. Open your web browser and navigate to the fully-qualified domain name you set for the value of the "actual_fqdn" variable (e.g., ht<span>tps://</span>budget.example.com). You should see the Actual Budget login page. You're now ready to setup your budget. Follow [Actual Budget's Getting Started][17] page for next steps.
@@ -191,16 +190,40 @@ terraform init -backend=false
 terraform validate
 ```
 
+## Versions and updates
+
+The host OS, application containers, and Terraform provider have separate update policies:
+
+Keep the non-sensitive VM defaults in the tracked `terraform.tfvars` rather than duplicating them in `sensitive.auto.tfvars`. An auto-variable file can override the tracked defaults and hide a later change to the selected image family.
+
+| Component | Configuration | Update behavior |
+| --- | --- | --- |
+| Host OS | `cos-125-lts` in `terraform.tfvars` | Resolves the latest image in the selected COS LTS milestone when creating a boot disk. It does not jump to a different milestone or update an existing host. |
+| Actual Server | `actualbudget/actual-server:latest` in `locals.tf` | A new host pulls the current image. Updating a running host requires pulling the image and restarting `actual.service`. |
+| Caddy | `caddy:alpine` in `locals.tf` | A new host pulls the current Alpine image. Updating a running host requires pulling the image and restarting `caddy.service`. |
+| Terraform Google provider | `versions.tf` and `.terraform.lock.hcl` | The constraint defines the supported range; the committed lock file selects the exact provider version and checksums. `terraform init -upgrade` selects a newer compatible provider for review. |
+
+Keep the boot disk's `ignore_changes = [image]` rule. It prevents an advancing image family from replacing the VM during a routine apply; it is the intended maintenance policy, not a temporary version pin. An explicit boot-disk and VM replacement uses the selected image at creation time. See Terraform's [lifecycle reference](https://developer.hashicorp.com/terraform/language/meta-arguments/lifecycle#ignore_changes).
+
+Automatic COS updates are [disabled by default for the selected LTS family](https://cloud.google.com/container-optimized-os/docs/concepts/auto-update), and this configuration does not enable them. Plan OS maintenance for security patches and choose a supported milestone before its [support window ends](https://cloud.google.com/container-optimized-os/docs/concepts/versioning); changing `vm_image_family` alone does not upgrade the running VM.
+
+Keep the provider lock file in Git. A provider upgrade changes Terraform's tooling, not the VM's OS or applications; review the resulting plan before applying. If a provider cannot decode existing state, use a compatible provider instead of editing state to remove attributes. See the [dependency lock file documentation](https://developer.hashicorp.com/terraform/language/files/dependency-lock).
+
 ## Infrastructure maintenance
 
-The VPC uses a custom subnet in the configured region. Existing auto-mode
-deployments need the [network adoption procedure](docs/infrastructure-operations.md#custom-mode-vpc-adoption)
-before applying this configuration. Use the [zone move procedure](docs/infrastructure-operations.md#moving-to-a-different-zone)
-when changing zones, so the VM and its disks stay together.
+The VPC uses a custom subnet in the configured region. The separate data disk holds Actual's data and Caddy's configuration and certificates; it is preserved during a host replacement and has Terraform destruction protection.
+
+Use the [host OS maintenance procedure](docs/infrastructure-operations.md#updating-the-host-os) for OS updates and the [zone move procedure](docs/infrastructure-operations.md#moving-to-a-different-zone) when changing zones. Both require backups, a reviewed plan, and verification before removing recovery copies. Device letters such as `/dev/sda` and `/dev/sdb` can change; the boot configuration identifies the data disk by `/dev/disk/by-id/google-persistent-disk-1` and mounts it at `/mnt/disks/data`.
+
+### Working from another computer
+
+Restore the ignored `backend.tf` and `sensitive.auto.tfvars`, use the existing HCP Terraform organization and workspace, and check the local SSH public-key path before running `terraform init` and `terraform plan`. A fresh checkout of an existing deployment must connect to its existing state.
+
+The HCP Terraform token authenticates CLI access to state; the Cloudflare token authenticates the VM's DNS updater. They are separate credentials. [`terraform login`](https://developer.hashicorp.com/terraform/cli/commands/login) saves its token in `~/.terraform.d/credentials.tfrc.json`, outside the repository. An expired HCP token requires logging in again but does not stop the running VM or DNS updater. Authenticate the Google CLI and Application Default Credentials as described in the setup instructions as well.
 
 ## Updating Actual Server
 
-Terraform preserves the existing boot disk when its image family advances. Updating the OS requires a planned boot-disk and VM replacement after backing up the data disk; a routine `terraform apply` does not perform that upgrade.
+Back up your budgets before updating Actual. Floating container tags permit newer releases; they do not automatically update an already-running container.
 
 To update Actual Server on the running VM:
 
@@ -214,6 +237,8 @@ To update Actual Server on the running VM:
    ![Manual update container](./readme_resources/update_container.png)
 3. Check the version in Actual.
    ![Version check](./readme_resources/actual_update.png)
+
+To update Caddy separately, run `sudo docker pull caddy:alpine` and `sudo systemctl restart caddy.service`, then verify HTTPS. Neither application update requires replacing the host OS.
 
 If updates eventually fail with `no space left on device`, inspect the containers and images, then remove unused Docker resources:
 
